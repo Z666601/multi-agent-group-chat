@@ -1,0 +1,71 @@
+{
+  "server": "http://127.0.0.1:8787",
+  "wsPath": "/ws",
+  "contextMessages": 12,
+  "replyCooldownMs": 2500,
+  "maxRepliesPerMinute": 8,
+  "maxAgentChain": 3,
+  "agents": [
+    {
+      "key": "demobrain",
+      "name": "本机演示大脑",
+      "avatar": "🧪",
+      "trigger": "all",
+      "replyToAgents": false,
+      "intro": "我是本机演示大脑：不依赖任何外部模型，用于证明「多智能体同群讨论」这条链路是通的。",
+      "supportsModel": false,
+      "brain": {
+        "type": "local"
+      }
+    },
+    {
+      "key": "example-cli",
+      "name": "示例CLI智能体",
+      "avatar": "🤖",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是示例：把任何命令行 AI（CLI）接进群聊的模板。把 command/args 换成你自己的工具即可。",
+      "supportsModel": false,
+      "brain": {
+        "type": "cmd",
+        "command": "/path/to/your/ai-cli",
+        "args": [
+          "--prompt",
+          "{prompt}"
+        ],
+        "timeoutMs": 180000
+      },
+      "unavailable": "无法应答：示例 CLI 调用失败，请检查 command 路径与登录状态。"
+    },
+    {
+      "key": "example-gateway",
+      "name": "示例网关智能体",
+      "avatar": "🌐",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是示例：把任何 OpenAI 兼容接口（网关/本地服务）接进群聊的模板。",
+      "supportsModel": true,
+      "modelArgs": [],
+      "brain": {
+        "type": "http",
+        "url": "http://127.0.0.1:PORT/v1/chat/completions",
+        "tokenFile": "/path/to/your/token-file",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": "your-model",
+          "messages": [
+            {
+              "role": "user",
+              "content": "{prompt}"
+            }
+          ]
+        },
+        "responsePath": "choices.0.message.content",
+        "timeoutMs": 180000
+      },
+      "unavailable": "无法接入：示例网关接口不可用（检查服务是否运行、端点与令牌是否正确）。"
+    }
+  ]
+}

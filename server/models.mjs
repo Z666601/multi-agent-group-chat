@@ -1,15 +1,13 @@
 // 模型目录：从本机可用来源汇总可选大模型，供界面下拉选择
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 let cache = null;
 let cacheAt = 0;
 const TTL_MS = 60_000;
 
-// 可用环境变量 HERMES_CONFIG / EKKO_CATALOG 指向自己的来源文件；默认按用户主目录探测
-const HERMES_CONFIG = process.env.HERMES_CONFIG || path.join(os.homedir(), 'AppData', 'Local', 'hermes', 'config.yaml');
-const EKKO_CATALOG = process.env.EKKO_CATALOG || path.join(os.homedir(), '.hermes-web-ui', 'cache', 'provider-model-catalog.json');
+const HERMES_CONFIG = 'C:/Users/Public/AppData/Local/hermes/config.yaml';
+const EKKO_CATALOG = 'C:/Users/Public/.hermes-web-ui/cache/provider-model-catalog.json';
 
 /** 从 Hermes config.yaml 提取 providers.*.models.* 的模型 id */
 function fromHermes() {

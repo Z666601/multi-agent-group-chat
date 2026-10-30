@@ -83,6 +83,47 @@ function markReply() {
   guard.replies.push(Date.now());
 }
 
+// ── 运行台账上报（留痕 + 用量统计，失败不阻塞发言）──
+function reportRun({ trigger, ok, error = null, durationMs, promptDigest = '' }) {
+  fetch(`${SERVER}/api/agent/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-agent-token': token },
+    body: JSON.stringify({ trigger, ok, error, durationMs, model: currentModel, promptDigest }),
+  }).catch(() => {});
+}
+
+// ── 忙锁：大脑思考中不接新触发，防止同一问题被并发处理 ──
+let busy = false;
+
+// ── 例程心跳：按配置定时让 Agent 主动冒泡（默认关）──
+if (agent.routine?.intervalMinutes > 0) {
+  const routine = agent.routine;
+  // 下限 5 分钟：防误配成极小值刷屏（mention 路径另有冷却/配额闸门，例程只有这一个闸）
+  const intervalMs = Math.max(5, routine.intervalMinutes) * 60_000;
+  setInterval(async () => {
+    if (stopping || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+    busy = true;
+    const t0 = Date.now();
+    log('例程触发：', routine.prompt || '例行冒泡');
+    try {
+      const reply = await think({
+        history,
+        prompt: [
+          `你是「${agent.name}」，这是一次例行心跳，不是有人提问。`,
+          routine.prompt || '用一两句话向群里简要汇报你的状态或补充一个观点。',
+          '要求：用简体中文，不超过 60 字。',
+        ].join('\n'),
+      });
+      postMessage(reply);
+      reportRun({ trigger: 'routine', ok: true, durationMs: Date.now() - t0 });
+    } catch (err) {
+      reportRun({ trigger: 'routine', ok: false, error: String(err?.message || err), durationMs: Date.now() - t0 });
+    } finally {
+      busy = false;
+    }
+  }, intervalMs);
+}
+
 // ── 大脑实现 ─────────────────────────────────────────
 function stripAnsi(s) {
   return String(s).replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
@@ -217,9 +258,22 @@ function runLocal(prompt, history) {
 
 async function think({ history, prompt }) {
   const spec = agent.brain || {};
-  if (spec.type === 'local') return runLocal(prompt, history);
-  if (spec.type === 'http') return runHttp(spec, prompt, currentModel);
-  return runCmd(spec, prompt, currentModel);
+  try {
+    if (spec.type === 'local') return await runLocal(prompt, history);
+    if (spec.type === 'http') return await runHttp(spec, prompt, currentModel);
+    return await runCmd(spec, prompt, currentModel);
+  } catch (err) {
+    // 降级链：主大脑挂掉（限流/超时/CLI 崩）时按 fallback 配置换通道重试一次，
+    // 成功则以「（tag作答）」前缀发言，群里能看出这轮不是主模型答的。
+    // local 演示大脑没有降级的意义，失败原样抛出走「无法应答」话术。
+    const fb = agent.fallback;
+    if (!fb || spec.type === 'local') throw err;
+    log('主大脑失败，尝试降级链：', String(err?.message || err).slice(0, 100));
+    const text = fb.type === 'http'
+      ? await runHttp(fb, prompt, currentModel)
+      : await runCmd(fb, prompt, currentModel);
+    return `（${fb.tag || '降级通道'}作答）\n${text}`;
+  }
 }
 
 // ── 当前所选模型（由界面设置，存在服务端）──────────
@@ -350,24 +404,35 @@ function connect() {
       if (mode === 'mention' && !named && !isAgentMsg) return;
       if (mode === 'mention' && isAgentMsg && !named) return;
       if (!canReply()) return;
+      if (busy) {
+        log('上一轮思考未结束，跳过本条触发');
+        return;
+      }
 
       markReply();
       log('开始思考 ←', (m.senderName || '') + '：' + text.slice(0, 40));
       signalTyping();
+      busy = true;
+      const t0 = Date.now();
+      const promptDigest = `${m.senderName || ''}：${text.slice(0, 80)}`;
       try {
         const reply = await think({ history, prompt: buildPrompt(history, m) });
         postMessage(reply);
         sendAgentStatus('ok');
+        reportRun({ trigger: 'mention', ok: true, durationMs: Date.now() - t0, promptDigest });
         log('已发言', String(reply).slice(0, 40) + '…');
       } catch (err) {
         const reason = String(err?.message || err);
         log('大脑失败：', reason);
         sendAgentStatus('unavailable', reason);
+        reportRun({ trigger: 'mention', ok: false, error: reason, durationMs: Date.now() - t0, promptDigest });
         const now = Date.now();
         if (agent.unavailable && now - guard.lastUnavailableAt > 60000) {
           guard.lastUnavailableAt = now;
           postMessage(agent.unavailable);
         }
+      } finally {
+        busy = false;
       }
       return;
     }

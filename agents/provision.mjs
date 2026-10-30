@@ -18,7 +18,7 @@ const argOf = (n, d) => {
   return hit.includes('=') ? hit.slice(hit.indexOf('=') + 1) : args[args.indexOf(hit) + 1] ?? d;
 };
 const OWNER = argOf('owner', 'app_owner');
-const OWNER_PASSWORD = argOf('password', 'app_owner_pass_change_me');
+const OWNER_PASSWORD = argOf('password', 'change-me-please');
 const GROUP_NAME = argOf('group', '多智能体讨论组');
 
 function adminToken() {

@@ -21,6 +21,7 @@ const state = {
   reportedRead: new Map(), // groupId -> 已向服务端上报到的最大 seq
   agentStatus: new Map(), // groupId -> { userId: { status, reason, at } } 智能体状态牌
   replyTo: null, // { id, name, snippet } 当前正在引用回复的消息
+  topicFilter: null, // 当前按 #话题 筛选（null = 不过滤）
   searchTimer: null,
   ws: null,
   wsState: 'connecting',
@@ -69,7 +70,7 @@ function initials(name) {
   return s.slice(0, 1).toUpperCase();
 }
 function colorFor(id) {
-  const palette = ['#4b5563', '#7c3aed', '#0f766e', '#b45309', '#be123c', '#1d4ed8', '#065f46', '#7c2d12'];
+  const palette = ['#5b6cff', '#c97b3c', '#17a398', '#c25e8a', '#7a6bd6', '#3e86b5'];
   let h = 0;
   for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 997;
   return palette[h % palette.length];
@@ -266,6 +267,11 @@ async function refreshGroups() {
     const data = await api('/groups');
     state.groups = data.groups || [];
     renderGroups();
+    if (!state.currentGroupId && state.groups.length && !state.autoPicked) {
+      state.autoPicked = true;
+      selectGroup(state.groups[0].id);
+      return;
+    }
     if (state.currentGroupId && !state.groups.find((g) => g.id === state.currentGroupId)) {
       state.currentGroupId = null;
       state.group = null;
@@ -322,6 +328,8 @@ async function selectGroup(groupId) {
     return;
   }
   state.currentGroupId = groupId;
+  state.topicFilter = null;
+  updateTopicBar();
   cancelReply();
   renderGroups();
   // 清空消息区（旧内容与静态空态节点一并移除，空态由 renderMessages 重建）
@@ -466,6 +474,33 @@ function addMessageToState(groupId, msg) {
   return true;
 }
 
+// ── 话题（#标签）筛选 ─────────────────────────────────
+function setTopicFilter(topic) {
+  state.topicFilter = state.topicFilter === topic ? null : topic;
+  updateTopicBar();
+  renderMessages();
+}
+
+function updateTopicBar() {
+  const bar = $('topic-filter');
+  if (!bar) return;
+  if (!state.topicFilter) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = '';
+  const label = document.createElement('span');
+  label.textContent = `话题筛选：#${state.topicFilter}`;
+  const clear = document.createElement('button');
+  clear.className = 'btn-link';
+  clear.type = 'button';
+  clear.textContent = '✕ 显示全部';
+  clear.addEventListener('click', () => setTopicFilter(null));
+  bar.append(label, clear);
+}
+
 function renderMessages({ keepScroll = false, prevHeight = 0 } = {}) {
   const groupId = state.currentGroupId;
   const box = $('messages');
@@ -477,14 +512,17 @@ function renderMessages({ keepScroll = false, prevHeight = 0 } = {}) {
     box.appendChild(e);
     return;
   }
-  const msgs = state.messages.get(groupId) || [];
+  const all = state.messages.get(groupId) || [];
+  const msgs = state.topicFilter ? all.filter((m) => m.topic === state.topicFilter) : all;
   const stick = nearBottom(box);
   box.innerHTML = '';
 
   if (!msgs.length) {
     const e = document.createElement('p');
     e.className = 'empty-state';
-    e.textContent = '这里还没有消息，说点什么吧。';
+    e.textContent = state.topicFilter
+      ? `当前已加载的消息里没有 #${state.topicFilter} 话题（更早的可在取消筛选后翻查）。`
+      : '这里还没有消息，说点什么吧。';
     box.appendChild(e);
   }
 
@@ -524,13 +562,13 @@ function buildMessage(m, prev) {
     prev.type === m.type &&
     new Date(m.createdAt) - new Date(prev.createdAt) < 5 * 60 * 1000;
   const row = document.createElement('article');
-  row.className = 'msg' + (continues ? ' continues' : '');
+  row.className = 'msg' + (continues ? ' continues' : '') + (m.senderId === state.me?.id ? ' mine' : '');
   row.dataset.seq = String(m.seq);
   row.dataset.id = m.id;
 
   const av = document.createElement('div');
   av.className = 'msg-avatar' + (m.senderKind === 'agent' ? ' agent' : '');
-  av.style.background = m.senderKind === 'agent' ? '#16181a' : colorFor(m.senderId);
+  if (m.senderKind !== 'agent') av.style.background = colorFor(m.senderId);
   av.textContent = m.senderAvatar && m.senderKind === 'agent'
     ? m.senderAvatar
     : initials(m.senderName || m.senderUsername);
@@ -557,6 +595,15 @@ function buildMessage(m, prev) {
   time.textContent = fmtTime(m.createdAt);
   time.title = new Date(m.createdAt).toLocaleString('zh-CN');
   head.appendChild(time);
+  if (m.topic) {
+    const chip = document.createElement('button');
+    chip.className = 'topic-chip' + (state.topicFilter === m.topic ? ' active' : '');
+    chip.type = 'button';
+    chip.textContent = '#' + m.topic;
+    chip.title = '按此话题筛选消息（再点一次取消）';
+    chip.addEventListener('click', () => setTopicFilter(m.topic));
+    head.appendChild(chip);
+  }
   if (!m.status) {
     const acts = document.createElement('span');
     acts.className = 'msg-actions';
@@ -1019,7 +1066,7 @@ $('file-input').addEventListener('change', async (e) => {
     const data = await api('/uploads', {
       method: 'POST',
       raw: file,
-      headers: { 'content-type': file.type, 'x-filename': file.name },
+      headers: { 'content-type': file.type, 'x-filename': file.name, 'x-group-id': state.currentGroupId },
     });
     note.textContent = '';
     const clientMsgId = uid();
@@ -1545,7 +1592,7 @@ window.addEventListener('offline', () => {
 // 本机免密进入：由服务端判定远端地址，前端只是试着要一个会话，失败就回落到密码登录表单
 async function localAutologin() {
   try {
-    const data = await api('/local', { method: 'POST', body: {} });
+    const data = await api('/auth/local', { method: 'POST', body: {} });
     state.token = data.token;
     state.me = data.user;
     localStorage.setItem(TOKEN_KEY, data.token);

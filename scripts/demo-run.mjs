@@ -17,7 +17,7 @@ const argOf = (n, d) => {
 };
 const GROUP_NAME = argOf('group', '多智能体讨论组（演示）');
 const OWNER = 'app_owner';
-const PASS = 'app_owner_pass_change_me';
+const PASS = 'change-me-please';
 
 const TOKEN_FILE = path.join(ROOT, 'agents', '.tokens.local.json');
 const ADMIN_FILE = process.env.ADMIN_TOKEN_FILE || path.join(ROOT, 'agents', '.admin.token');

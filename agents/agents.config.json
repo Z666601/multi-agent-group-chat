@@ -7,6 +7,120 @@
   "maxAgentChain": 3,
   "agents": [
     {
+      "key": "autoclaw",
+      "name": "AutoClaw",
+      "avatar": "🤖",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是 AutoClaw，可以通过 OpenClaw 网关的模型接口参与讨论。",
+      "supportsModel": true,
+      "modelArgs": [
+        "x-openclaw-model: {model}"
+      ],
+      "brain": {
+        "type": "http",
+        "url": "http://127.0.0.1:18789/v1/chat/completions",
+        "tokenFile": "C:/Users/Public/.openclaw-autoclaw/.gateway-token",
+        "headers": {
+          "content-type": "application/json",
+          "x-openclaw-model": "{model}"
+        },
+        "body": {
+          "model": "openclaw",
+          "messages": [
+            {
+              "role": "user",
+              "content": "{prompt}"
+            }
+          ]
+        },
+        "responsePath": "choices.0.message.content",
+        "timeoutMs": 180000
+      },
+      "unavailable": "无法接入：OpenClaw 网关 /v1/chat/completions 不可用（检查网关是否运行、chatCompletions 端点是否开启）。"
+    },
+    {
+      "key": "hermes",
+      "name": "Hermes",
+      "avatar": "🔮",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是 Hermes Agent，通过本机 CLI 参与讨论。",
+      "supportsModel": true,
+      "modelArgs": [
+        "-m",
+        "{model}"
+      ],
+      "brain": {
+        "type": "cmd",
+        "command": "C:/Users/Public/AppData/Local/hermes/bin/hermes.exe",
+        "args": [
+          "-z",
+          "{prompt}"
+        ],
+        "timeoutMs": 300000
+      },
+      "fallback": {
+        "type": "cmd",
+        "command": "C:/Users/Public/AppData/Local/hermes/node/node.exe",
+        "args": [
+          "--no-warnings",
+          "agents/qoder-brain.mjs",
+          "{prompt}"
+        ],
+        "timeoutMs": 280000,
+        "tag": "本地降级"
+      },
+      "unavailable": "无法应答：Hermes 这次没答上来（`hermes -z` 失败或超过席位时限）。先查 智谱 通道是否被限流（1302 速率限制 / 1113 无资源包），再看 GLM-5.3-Flash 是否在时限内答完——这条模型会先写一大段 reasoning，慢的时候容易顶到上限。"
+    },
+    {
+      "key": "ekko",
+      "name": "Ekko Studio",
+      "avatar": "🎛️",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是 Ekko Studio，通过本机 8748 端口的工作台接口参与讨论。",
+      "supportsModel": true,
+      "brain": {
+        "type": "http",
+        "url": "http://127.0.0.1:8748/api/studio/chat-run/runs",
+        "tokenFile": "C:/Users/Public/.hermes-web-ui/.bridge-token",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "input": "{prompt}",
+          "model": "{model}"
+        },
+        "responsePath": "output",
+        "timeoutMs": 240000
+      },
+      "unavailable": "无法应答：Ekko Studio 接口不可用（需 Ekko Studio 正在运行且桥接令牌有效；令牌有效期至 2027-09，过期后需重新签发）。"
+    },
+    {
+      "key": "zcode",
+      "name": "ZCode",
+      "avatar": "⌨️",
+      "trigger": "mention",
+      "replyToAgents": false,
+      "intro": "我是 ZCode，通过本机 zcode CLI 参与讨论。",
+      "supportsModel": false,
+      "brain": {
+        "type": "cmd",
+        "command": "D:/Autoclaw/resources/zcode/win32-x64/zcode.exe",
+        "args": [
+          "--prompt",
+          "{prompt}",
+          "--mode",
+          "plan",
+          "--cwd",
+          "C:/Users/Public"
+        ],
+        "timeoutMs": 300000
+      },
+      "unavailable": "无法应答：ZCode CLI 调用失败。走的是她本机 智谱 账号（ID 尾号 3990）的编程套餐 key，先看 ~/.zcode/cli/config.json 里 provider.bigmodel.options.apiKey 是否还有效，再看套餐窗口额度。"
+    },
+    {
       "key": "demobrain",
       "name": "本机演示大脑",
       "avatar": "🧪",
@@ -19,53 +133,24 @@
       }
     },
     {
-      "key": "example-cli",
-      "name": "示例CLI智能体",
-      "avatar": "🤖",
+      "key": "qoder",
+      "name": "Qoder",
+      "avatar": "🟣",
       "trigger": "mention",
       "replyToAgents": false,
-      "intro": "我是示例：把任何命令行 AI（CLI）接进群聊的模板。把 command/args 换成你自己的工具即可。",
+      "intro": "我是 Qoder，通过本机 qodercli 参与讨论。",
       "supportsModel": false,
       "brain": {
         "type": "cmd",
-        "command": "/path/to/your/ai-cli",
+        "command": "C:/Users/Public/AppData/Local/hermes/node/node.exe",
         "args": [
-          "--prompt",
+          "--no-warnings",
+          "agents/qoder-brain.mjs",
           "{prompt}"
         ],
-        "timeoutMs": 180000
+        "timeoutMs": 300000
       },
-      "unavailable": "无法应答：示例 CLI 调用失败，请检查 command 路径与登录状态。"
-    },
-    {
-      "key": "example-gateway",
-      "name": "示例网关智能体",
-      "avatar": "🌐",
-      "trigger": "mention",
-      "replyToAgents": false,
-      "intro": "我是示例：把任何 OpenAI 兼容接口（网关/本地服务）接进群聊的模板。",
-      "supportsModel": true,
-      "modelArgs": [],
-      "brain": {
-        "type": "http",
-        "url": "http://127.0.0.1:PORT/v1/chat/completions",
-        "tokenFile": "/path/to/your/token-file",
-        "headers": {
-          "content-type": "application/json"
-        },
-        "body": {
-          "model": "your-model",
-          "messages": [
-            {
-              "role": "user",
-              "content": "{prompt}"
-            }
-          ]
-        },
-        "responsePath": "choices.0.message.content",
-        "timeoutMs": 180000
-      },
-      "unavailable": "无法接入：示例网关接口不可用（检查服务是否运行、端点与令牌是否正确）。"
+      "unavailable": "无法应答：Qoder CLI（qoderclicn）调用失败，请确认其登录状态（运行 qoderclicn login）。"
     }
   ]
 }

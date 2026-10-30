@@ -1,22 +1,31 @@
 # 群聊（auto-group-chat）
 
-自建 Web 群聊：**建群 / 邀请成员 / 实时收发 / 历史回溯 / 断线补齐不丢不重 / 引用回复 / 历史搜索 / 智能体状态牌 / 成员与权限管理 / 审计台账 / 可观测性**。
+自建 Web 群聊：**建群 / 邀请成员 / 实时收发 / 历史回溯 / 断线补齐不丢不重 / 引用回复 / 历史搜索 / #话题筛选 / 智能体状态牌 / 成员与权限管理 / Agent 运行台账 / 审计台账 / 可观测性**。
 
 - 零第三方依赖：只用 Node.js 内置模块（`node:http`、`node:crypto`、`node:sqlite`）与一段自实现的 RFC6455 WebSocket 服务端。
-- 前端为单页原生 JS + CSS，系统字体、零装饰（Information Architects 风格），桌面与移动自适应。
+- 前端为单页原生 JS + CSS，系统字体、飞书式简约风格（灰底白卡、蓝色气泡消息、话题 chip），桌面与移动自适应。
 - 数据落在 SQLite（WAL 模式），带审计台账与指标接口。
 
 ---
 
-## 快速开始
+## 桌面 APP（推荐）
 
-见下方「一键启动」：起服务后浏览器打开 `http://127.0.0.1:8787`，注册一个账号即可建群。
+```powershell
+powershell -ExecutionPolicy Bypass -File desktop\安装桌面快捷方式.ps1
+```
+
+执行后桌面上会出现：
+
+- **「群聊」快捷方式**（自定义图标，指向一键启动器）
+- **「群聊」文件夹**（含 `启动群聊.cmd` / `停止群聊.cmd` / `使用说明.txt`）
+
+双击「群聊」即完成：启动服务 → 准备多智能体讨论组 → 拉起全部 Agent → 打开独立应用窗口（Chrome `--app` 模式，无浏览器工具栏）。默认账号 `app_owner` / `change-me-please`。
 
 ---
 
 ## 多智能体讨论
 
-群聊支持把外部 AI 智能体（命令行 CLI、OpenAI 兼容网关、内置演示大脑）作为**真实的群成员**拉进同一个房间讨论：
+群聊支持把外部 AI 智能体（AutoClaw / Hermes / Ekko Studio / ZCode / 自建）作为**真实的群成员**拉进同一个房间讨论：
 
 ```bash
 node agents/provision.mjs --group="多智能体讨论组（演示）"   # 建群 + 为每个 Agent 发放入群令牌（幂等）
@@ -24,10 +33,11 @@ node agents/start-all.mjs        # 拉起全部 Agent 桥接器
 node scripts/demo-run.mjs        # 一键演示：发议题并回读房间内容
 ```
 
-- 桥接器 `agents/bridge.mjs` 支持可插拔大脑（`cmd` / `http` / `local`），`agents/agents.config.json` 里有三种模板（演示大脑 / CLI 示例 / 网关示例），换成你自己的工具即可
-- **成员面板可为每个 Agent 单独选择大模型**（下拉栏，切换后经 WebSocket 即时下发给对应 Agent）
+- 桥接器 `agents/bridge.mjs` 支持可插拔大脑（`cmd` / `http` / `local`）
+- **成员面板可为每个 Agent 单独选择大模型**（下拉栏，选项来自本机模型目录，切换后经 WebSocket 即时下发给对应 Agent）
 - 内置四道防打架闸门（触发模式、是否回应智能体、冷却配额、链长上限），实测修复过一轮「回声风暴」
 - 大脑不可用时会在群里明确说明原因，不静默、不贴原始报错
+- **各 Agent 的接入条件与开启方法见 [多智能体文档](docs/07-multi-agent.md)**
 
 ---
 
@@ -71,7 +81,7 @@ group-chat/
 ├─ db/schema.sql      建表与索引（幂等）
 ├─ scripts/           migrate.mjs、start-dev.ps1、start-dev.sh
 ├─ tests/
-│  ├─ smoke.mjs       端到端自检（43 项断言）
+│  ├─ smoke.mjs       端到端自检（79 项断言）
 │  └─ loadtest.mjs    容量压测（默认 500 连接）
 └─ docs/              部署 / 验收 / 异常路径 / 可观测 / 回滚 / 交接
 ```
@@ -95,7 +105,7 @@ group-chat/
 ```bash
 npm start          # 启动服务
 npm run migrate    # 初始化/升级数据库结构
-npm test           # 端到端自检（43 项断言）
+npm test           # 端到端自检（79 项断言）
 npm run loadtest   # 容量压测（默认 500 连接）
 npm run drill      # 回滚演练（备份 → 校验 → 恢复 → 比对）
 npm run capture    # 用无头 Chrome 对真实页面截图（需先启动服务）

@@ -30,6 +30,7 @@ function msgView(m) {
     body: m.body,
     attachmentId: m.attachment_id || null,
     replyTo: m.reply_to || null,
+    topic: m.topic || null,
     createdAt: m.created_at,
   };
   if (m.reply_to) {
@@ -205,6 +206,16 @@ export function createRouter({ log, metrics, hub, config, adminToken }) {
         store.audit.log({ type: 'login_local_denied', detail: { peer }, ip });
         metrics.inc('auth.login_local_denied');
         return fail(res, 403, 'not_local', '只允许本机回环地址免密进入');
+      }
+      // Host/Origin 也必须是本机：防 DNS rebinding 与本机其它进程借网页发起
+      const host = String(req.headers?.host || '').toLowerCase();
+      const origin = String(req.headers?.origin || '').toLowerCase();
+      const hostOk = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+      const originOk = !origin || /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin);
+      if (!hostOk || !originOk) {
+        store.audit.log({ type: 'login_local_denied', detail: { peer, host, origin }, ip });
+        metrics.inc('auth.login_local_denied');
+        return fail(res, 403, 'bad_host', '免密入口只接受本机地址');
       }
       const localUser = store.users.byUsername(config.localAutologinUser);
       if (!localUser || localUser.status !== 'active') {
@@ -593,6 +604,15 @@ export function createRouter({ log, metrics, hub, config, adminToken }) {
         throw err;
       }
       if (!buf.length) return fail(res, 400, 'empty_file', '图片内容为空');
+      const groupId = String(req.headers['x-group-id'] || '').slice(0, 64) || null;
+      if (groupId) {
+        const g = store.groups.byId(groupId);
+        if (!g || g.status !== 'active' || !store.members.isActive(groupId, user.id)) {
+          store.audit.log({ type: 'authz_denied', actorId: user.id, groupId, detail: { op: 'upload_attachment' }, ip });
+          metrics.inc('authz.denied.upload_attachment');
+          return fail(res, 403, 'not_a_member', '你不是该群成员，不能往该群上传图片');
+        }
+      }
       const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }[mime];
       const attId = newId('att');
       const dir = path.join(config.dataDir, 'uploads');
@@ -601,6 +621,7 @@ export function createRouter({ log, metrics, hub, config, adminToken }) {
       fs.writeFileSync(dest, buf);
       const att = store.attachments.create({
         id: attId,
+        groupId,
         uploaderId: user.id,
         filename: String(req.headers['x-filename'] || `image.${ext}`).slice(0, 120),
         mime,
@@ -627,6 +648,15 @@ export function createRouter({ log, metrics, hub, config, adminToken }) {
     ({ res, user, params }) => {
       const att = store.attachments.byId(params.id);
       if (!att) return fail(res, 404, 'attachment_not_found', '附件不存在');
+      if (!att.group_id && att.uploader_id !== user.id) {
+        store.audit.log({
+          type: 'authz_denied',
+          actorId: user.id,
+          detail: { op: 'read_attachment', attachmentId: att.id },
+        });
+        metrics.inc('authz.denied.read_attachment');
+        return fail(res, 403, 'not_owner', '该附件未绑定群，仅上传者可访问');
+      }
       if (att.group_id && !store.members.isActive(att.group_id, user.id)) {
         store.audit.log({
           type: 'authz_denied',
@@ -857,6 +887,57 @@ export function createRouter({ log, metrics, hub, config, adminToken }) {
     },
     { auth: false },
   );
+
+  // ── 智能体运行台账（留痕 + 用量统计）───────────────
+  add(
+    'POST',
+    '/api/agent/runs',
+    ({ res, req, body }) => {
+      const binding = resolveAgent(req);
+      if (!binding) return fail(res, 401, 'invalid_agent_token', 'Agent 令牌无效');
+      store.agentRuns.log({
+        groupId: binding.group_id,
+        agentKey: binding.agent_key,
+        trigger: String(body.trigger || 'mention').slice(0, 16),
+        model: String(body.model || '').slice(0, 64),
+        ok: !!body.ok,
+        error: body.error ? String(body.error) : null,
+        durationMs: Number(body.durationMs) || 0,
+        promptDigest: String(body.promptDigest || ''),
+      });
+      metrics.inc(body.ok ? 'agent.run_ok' : 'agent.run_failed');
+      return json(res, 201, { ok: true });
+    },
+    { auth: false },
+  );
+
+  add('GET', '/api/groups/:id/agent-runs', ({ res, user, params, url }) => {
+    const g = store.groups.byId(params.id);
+    if (!g) return fail(res, 404, 'group_not_found', '群组不存在');
+    if (!store.members.isActive(g.id, user.id)) {
+      return fail(res, 403, 'not_a_member', '你不是该群成员');
+    }
+    const agentKey = url.searchParams.get('agentKey');
+    return json(res, 200, {
+      ok: true,
+      stats: store.agentRuns.statsByAgent(g.id),
+      recent: store.agentRuns.list({
+        groupId: g.id,
+        agentKey,
+        limit: Math.min(200, Number(url.searchParams.get('limit')) || 50),
+      }),
+    });
+  });
+
+  // ── 话题（#标签）────────────────────────────────────
+  add('GET', '/api/groups/:id/topics', ({ res, user, params }) => {
+    const g = store.groups.byId(params.id);
+    if (!g) return fail(res, 404, 'group_not_found', '群组不存在');
+    if (!store.members.isActive(g.id, user.id)) {
+      return fail(res, 403, 'not_a_member', '你不是该群成员');
+    }
+    return json(res, 200, { ok: true, topics: store.messages.topics(g.id) });
+  });
 
   // ── 管理台（审计 / 指标 / 台账查询）───────────────
   add(
